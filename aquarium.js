@@ -1,35 +1,44 @@
 // Get terminal size dynamically
-const { stdout } = require('process');
-let width = stdout.columns;
-let height = stdout.rows - 1; // Leave 1 row for the cursor reset
+const process = require('process');
+let width = process.stdout.columns;
+let height = process.stdout.rows - 1; // Leave 1 row for the cursor reset
 
 // Event listener for terminal resize
-stdout.on('resize', () => {
-    width = stdout.columns;
-    height = stdout.rows - 1;
-});
+function debounce(func, timeout = 300) {
+    let timer;
+    return (...args) => {
+        clearTimeout(timer);
+        timer = setTimeout(() => { func.apply(this, args); }, timeout);
+    };
+}
+
+process.stdout.on('resize', debounce(() => {
+    width = process.stdout.columns;
+    height = process.stdout.rows - 1;
+}));
 
 let bubbles = [];
 
-// Initialize fish positions for multiple fish
-let fishX1 = 0;
-let fishX2 = 15;
-let fishX3 = 30;
-let fishX4 = 45;
-let fishX5 = 60;
-
-let prevFishX1, prevFishX2, prevFishX3, prevFishX4, prevFishX5; // Previous positions to clear fish
+// Initialize fish positions and directions for multiple fish
+let fish = [
+    { x: 0, y: 0, direction: 'right' },
+    { x: 15, y: 0, direction: 'right' },
+    { x: 30, y: 0, direction: 'right' },
+    { x: 45, y: 0, direction: 'right' },
+    { x: 60, y: 0, direction: 'right' },
+    { x: width - 1, y: 0, direction: 'left' } // Adjusted for correct initial position
+];
 
 // Dynamically calculate fish Y-positions based on terminal height
 let fishYPositions = [];
 
-// Define different fish types
+// Define different fish types and their mirrored versions
 const fishTypes = [
-    '><(((',    // Classic Fish
-    '><>',      // Small Fish
-    '><(((º>',  // Big Fish
-    '><====>',  // Shark
-    '><(((°>',  // Fancy Fish
+    { normal: '><(((o', mirrored: 'o)))><', color: '\x1b[34m' }, // Classic Fish, Blue
+    { normal: '><>', mirrored: '<><', color: '\x1b[32m' },       // Small Fish, Green
+    { normal: '><(((º>', mirrored: 'º)))><', color: '\x1b[31m' }, // Big Fish, Red
+    { normal: '><====>', mirrored: '<====><', color: '\x1b[35m' }, // Shark, Magenta
+    { normal: '><(((°>', mirrored: '°)))><', color: '\x1b[36m' }   // Fancy Fish, Cyan
 ];
 
 // Function to create the aquarium matrix
@@ -53,8 +62,8 @@ function createAquarium() {
 
 // Function to dynamically update fish Y-positions
 function updateFishYPositions() {
-    height = stdout.rows - 1; // Update height in case of terminal resize
-    width = stdout.columns; // Update width in case of terminal resize
+    height = process.stdout.rows - 1; // Update height in case of terminal resize
+    width = process.stdout.columns; // Update width in case of terminal resize
     fishYPositions = [
         Math.floor(height * 0.2), // Position for Classic Fish
         Math.floor(height * 0.4), // Position for Small Fish
@@ -65,8 +74,9 @@ function updateFishYPositions() {
 }
 
 // Function to clear previous fish positions
-function clearPreviousFish(aquarium, x, y, fishType) {
-    for (let i = 0; i < fishType.length; i++) {
+function clearPreviousFish(aquarium, x, y, fishType, direction) {
+    const fishLength = direction === 'right' ? fishType.normal.length : fishType.mirrored.length;
+    for (let i = 0; i < fishLength; i++) {
         if (x + i >= 0 && x + i < width && y >= 0 && y < height) {
             aquarium[y][x + i] = ' '; // Clear the previous fish position
         }
@@ -74,14 +84,13 @@ function clearPreviousFish(aquarium, x, y, fishType) {
 }
 
 // Function to add fish to the aquarium with colors
-function addFish(aquarium, x, y, fishType, color) {
-    const resetColor = '\x1b[0m';
-    const fishArray = Array.from(fishType); // Properly handle multi-byte characters
-    const coloredFishArray = fishArray.map(char => `${color}${char}${resetColor}`);
-
-    for (let i = 0; i < fishArray.length; i++) {
-        if (x + i >= 0 && x + i < width && y >= 0 && y < height) {
-            aquarium[y][x + i] = coloredFishArray[i];
+function addFish(aquarium, x, y, fishType, color, direction) {
+    let fishString = (direction === 'right' ? fishType.normal : fishType.mirrored);
+    // Apply color
+    fishString = color + fishString + '\x1b[0m'; // Reset color after fish
+    for (let i = 0; i < fishString.length; i++) {
+        if (x + i >= 0 && x + i < width) {
+            aquarium[y][x + i] = fishString[i]; // Place each character of the fish
         }
     }
 }
@@ -101,7 +110,7 @@ function updateBubbles(aquarium) {
 // Function to add bubbles to the aquarium at random positions
 function addBubbles() {
     if (Math.random() < 0.5) { // Adjust probability to control bubble generation rate
-        bubbles.push({ x: Math.floor(Math.random() * width), y: height - 1 });
+        bubbles.push({ x: Math.floor(Math.random() * width), y: height - 2 });
     }
 }
 
@@ -117,7 +126,7 @@ function drawBubbles(aquarium) {
 // Function to display the aquarium
 function displayAquarium(aquarium) {
     // Move the cursor to the top-left corner of the terminal
-    stdout.write('\x1B[0;0H');
+    process.stdout.write('\x1B[0;0H');
     aquarium.forEach(row => {
         console.log(row.join(''));
     });
@@ -131,54 +140,69 @@ function mainLoop() {
     addBubbles(); // Add new bubbles
     updateBubbles(aquarium); // Update existing bubbles
     drawBubbles(aquarium); // Draw bubbles in the aquarium
-    
+
     // Clear previous fish positions to prevent blinking
-    clearPreviousFish(aquarium, prevFishX1, fishYPositions[0], fishTypes[0]);
-    clearPreviousFish(aquarium, prevFishX2, fishYPositions[1], fishTypes[1]);
-    clearPreviousFish(aquarium, prevFishX3, fishYPositions[2], fishTypes[2]);
-    clearPreviousFish(aquarium, prevFishX4, fishYPositions[3], fishTypes[3]);
-    clearPreviousFish(aquarium, prevFishX5, fishYPositions[4], fishTypes[4]);
+    fish.forEach(f => {
+        clearPreviousFish(aquarium, f.x, fishYPositions[0], fishTypes[0], f.direction);
+    });
 
     // Add fish with different styles and colors at dynamically calculated Y-positions
-    addFish(aquarium, fishX1, fishYPositions[0], fishTypes[0], '\x1b[34m');  // Blue Classic Fish
-    addFish(aquarium, fishX2, fishYPositions[1], fishTypes[1], '\x1b[31m');  // Red Small Fish
-    addFish(aquarium, fishX3, fishYPositions[2], fishTypes[2], '\x1b[33m');  // Yellow Big Fish
-    addFish(aquarium, fishX4, fishYPositions[3], fishTypes[3], '\x1b[32m');  // Green Shark
-    addFish(aquarium, fishX5, fishYPositions[4], fishTypes[4], '\x1b[36m');  // Cyan Fancy Fish
-    
+    fish.forEach((f, index) => {
+        addFish(aquarium, f.x, fishYPositions[index % fishYPositions.length], fishTypes[index % fishTypes.length], fishTypes[index % fishTypes.length].color, f.direction);
+    });
+
     displayAquarium(aquarium);
 
-    // Move fish at different speeds
-    fishX1 += 1;  // Classic Fish
-    fishX2 += 2;  // Small Fish moves faster
-    fishX3 += 1;  // Big Fish
-    fishX4 += 0.5;  // Shark moves slower
-    fishX5 += 1.5;  // Fancy Fish
-
-    // Reset fish positions when they reach the end
-    if (fishX1 > width - fishTypes[0].length) fishX1 = 0;
-    if (fishX2 > width - fishTypes[1].length) fishX2 = 0;
-    if (fishX3 > width - fishTypes[2].length) fishX3 = 0;
-    if (fishX4 > width - fishTypes[3].length) fishX4 = 0;
-    if (fishX5 > width - fishTypes[4].length) fishX5 = 0;
-
-    // Store previous positions to clear them in the next frame
-    prevFishX1 = fishX1;
-    prevFishX2 = fishX2;
-    prevFishX3 = fishX3;
-    prevFishX4 = fishX4;
-    prevFishX5 = fishX5;
+  // Move fish at different speeds and change direction if needed
+fish.forEach(f => {
+    const fishType = fishTypes[fish.indexOf(f) % fishTypes.length];
+    const fishLength = f.direction === 'right' ? fishType.normal.length : fishType.mirrored.length;
+    if (f.direction === 'right') {
+        f.x += 1;
+        if (f.x >= width - fishLength) { // Correctly adjust based on fish type length
+            f.direction = 'left';
+            f.x = width - fishLength - 1; // Ensure fish turns around before hitting the edge
+        }
+    } else {
+        f.x -= 1;
+        if (f.x < 0) {
+            f.direction = 'right';
+            f.x = 0; // Reset to left edge
+        }
+    }
+});
 }
 
-let buffer1 = createAquarium();
-let buffer2 = createAquarium();
-let currentBuffer = buffer1;
-let displayBuffer = buffer2;
+// Function to randomize fish positions to avoid overlap
+function randomizeFishPositions() {
+    const maxFishLength = Math.max(...fishTypes.map(f => f.normal.length)); // Find the longest fish
+    const availablePositions = [];
+    // Generate available positions considering fish length to avoid overlap
+    for (let y = 1; y < height - 1; y++) { // Avoid top and bottom borders
+        for (let x = 1; x < width - maxFishLength; x++) { // Avoid side borders and ensure fish fit
+            availablePositions.push({ x, y });
+        }
+    }
 
-function swapBuffers() {
-    let temp = displayBuffer;
-    displayBuffer = currentBuffer;
-    currentBuffer = temp;
+    // Shuffle available positions to randomize
+    for (let i = availablePositions.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [availablePositions[i], availablePositions[j]] = [availablePositions[j], availablePositions[i]];
+    }
+
+    // Assign positions to fish from the shuffled available positions
+    fish.forEach((f, index) => {
+        if (index < availablePositions.length) {
+            const pos = availablePositions[index];
+            f.x = pos.x;
+            f.y = pos.y;
+        } else {
+            // If more fish than positions, place remaining fish outside the visible area
+            f.x = -1;
+            f.y = -1;
+        }
+    });
 }
 
-setInterval(mainLoop, 100); // Call mainLoop() every 100 milliseconds
+// Set up an interval to continuously update and display the aquarium
+setInterval(mainLoop, 20); // Reduced the interval to make animation smoother
